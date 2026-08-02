@@ -148,6 +148,29 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:text="Step 5: USB emulation + auto BT position bridge"
+            android:textStyle="bold"
+            android:paddingTop="16dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:background="#332A1B"
+            android:padding="8dp"
+            android:text="USB button plays a real silent local MediaPlayer loop under our own claimed source -- this is what Step 4 confirmed actually gets reported. The bridge below auto-detects BT playback and syncs the loop's position to match it. Bridge needs one-time Notification access (opens Settings automatically)."
+            android:textColor="#F5C36B"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/btnBtBridge"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Start BT→USB bridge (auto)" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
             android:text="Log:"
             android:textStyle="bold"
             android:paddingTop="16dp" />

@@ -1,11 +1,17 @@
 package com.debug.cansourcetester;
 
 import android.app.Activity;
+import android.content.ComponentName;
 import android.content.Intent;
+import android.media.MediaPlayer;
+import android.media.session.MediaController;
+import android.media.session.MediaSessionManager;
+import android.media.session.PlaybackState;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
+import android.provider.Settings;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
@@ -16,6 +22,8 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
 
+import androidx.core.app.NotificationManagerCompat;
+
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -24,6 +32,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -77,6 +86,31 @@ public class MainActivity extends Activity {
         }
     };
 
+    // ---------- Step 5: USB emulation + auto BT->USB position bridge ----------
+    // Real local MediaPlayer (looping a silent WAV) claimed under our own
+    // package as source -- this is the mechanism confirmed by the Step 4 log
+    // capture (real Music app playback reported via the patched MediaPlayer
+    // hook, not MediaSessionCompat). BT audio can't trigger that hook itself
+    // (BT playback happens on the phone, no local MediaPlayer instance for
+    // it exists on the head unit) -- so the bridge reads BT's real position
+    // from its MediaSession (needs Notification access, public API, not
+    // reflection) and periodically re-seeks our silent player to match.
+    private static final long BRIDGE_POLL_INTERVAL_MS = 2000;
+    private MediaPlayer silentPlayer;
+    private boolean usbEmulationActive = false;
+    private boolean bridgeWatchRunning = false;
+    private boolean notifAccessWarned = false;
+    private MediaSessionManager mediaSessionManager;
+
+    private final Runnable bridgeWatchRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!bridgeWatchRunning) return;
+            pollBridgeOnce();
+            handler.postDelayed(this, BRIDGE_POLL_INTERVAL_MS);
+        }
+    };
+
     // ---------- log-to-file ----------
     // Writes happen on their own background thread so disk I/O never blocks
     // the UI thread on this weak hardware. File lives in the app's own
@@ -119,6 +153,7 @@ public class MainActivity extends Activity {
         Button btnKeyMusic = findViewById(R.id.btnKeyMusic);
         Button btnFuelInfo = findViewById(R.id.btnFuelInfo);
         Button btnMusicListener = findViewById(R.id.btnMusicListener);
+        Button btnBtBridge = findViewById(R.id.btnBtBridge);
 
         // Step 1: claim source. Confirmed by decompiling the real BluetoothService.apk
         // (android.sourceservice.SourceInfo, android.sourceservice.SourceService):
@@ -135,9 +170,22 @@ public class MainActivity extends Activity {
         // SourceService as a distinct, specially-handled package) is the best candidate
         // for a physical AUX-in source — untested, flag it clearly in the log.
         btnRadio.setOnClickListener(v -> claimSource("com.hcn.autoradio"));
-        btnUsb.setOnClickListener(v -> claimSource("com.android.usb"));
         btnBt.setOnClickListener(v -> claimSource("com.autochips.bluetooth/.BtMusicActivity"));
         btnAux.setOnClickListener(v -> claimSource("com.hcn.audioinputsource"));
+
+        // USB button now does the real thing instead of just claiming the
+        // (nonexistent) "com.android.usb" source key: it starts our own real
+        // local MediaPlayer loop under our own package as source, the exact
+        // mechanism Step 4's log capture confirmed actually gets reported.
+        btnUsb.setOnClickListener(v -> {
+            if (usbEmulationActive) {
+                stopUsbEmulation();
+                btnUsb.setText("USB");
+            } else {
+                startUsbEmulation();
+                btnUsb.setText("USB (stop)");
+            }
+        });
 
         btnStart.setOnClickListener(v -> startFakeSession());
         btnStop.setOnClickListener(v -> stopFakeSession());
@@ -157,6 +205,16 @@ public class MainActivity extends Activity {
             } else {
                 startMusicListener();
                 btnMusicListener.setText("Stop MusicInfo listener");
+            }
+        });
+
+        btnBtBridge.setOnClickListener(v -> {
+            if (bridgeWatchRunning) {
+                stopBridgeWatch();
+                btnBtBridge.setText("Start BT" + "→" + "USB bridge (auto)");
+            } else {
+                startBridgeWatch();
+                btnBtBridge.setText("Stop BT" + "→" + "USB bridge (auto)");
             }
         });
 
@@ -355,6 +413,129 @@ public class MainActivity extends Activity {
         }
     }
 
+    // ---------- Step 5 implementation ----------
+
+    private void startUsbEmulation() {
+        claimSource(getPackageName());
+        try {
+            if (silentPlayer == null) {
+                silentPlayer = MediaPlayer.create(this, R.raw.silence);
+                silentPlayer.setLooping(true);
+                silentPlayer.setVolume(0f, 0f); // belt-and-braces mute even though content is silent
+            }
+            if (!silentPlayer.isPlaying()) {
+                silentPlayer.start();
+            }
+            usbEmulationActive = true;
+            log("USB emulation started: local MediaPlayer looping under source=" + getPackageName());
+        } catch (Exception e) {
+            log("FAIL startUsbEmulation: " + e);
+            usbEmulationActive = false;
+        }
+    }
+
+    private void stopUsbEmulation() {
+        if (silentPlayer != null && silentPlayer.isPlaying()) {
+            try {
+                silentPlayer.pause();
+            } catch (Exception e) {
+                log("FAIL stopUsbEmulation: " + e);
+            }
+        }
+        usbEmulationActive = false;
+        log("USB emulation stopped.");
+    }
+
+    private void startBridgeWatch() {
+        if (bridgeWatchRunning) return;
+        bridgeWatchRunning = true;
+        notifAccessWarned = false;
+        log("BT->USB bridge watch started (polling every " + (BRIDGE_POLL_INTERVAL_MS / 1000) + "s).");
+        if (!hasNotificationAccess()) {
+            log("Notification access not granted yet -- opening Settings. Grant it for \""
+                    + getPackageName() + "\", come back, and this will pick it up automatically.");
+            try {
+                startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
+            } catch (Exception e) {
+                log("FAIL opening notification listener settings: " + e);
+            }
+        }
+        handler.removeCallbacks(bridgeWatchRunnable);
+        handler.post(bridgeWatchRunnable);
+    }
+
+    private void stopBridgeWatch() {
+        bridgeWatchRunning = false;
+        handler.removeCallbacks(bridgeWatchRunnable);
+        log("BT->USB bridge watch stopped.");
+    }
+
+    private boolean hasNotificationAccess() {
+        return NotificationManagerCompat.getEnabledListenerPackages(this).contains(getPackageName());
+    }
+
+    private void pollBridgeOnce() {
+        if (!hasNotificationAccess()) {
+            if (!notifAccessWarned) {
+                notifAccessWarned = true;
+                log("Still no notification access -- bridge can't read BT playback position until granted.");
+            }
+            return;
+        }
+        try {
+            if (mediaSessionManager == null) {
+                mediaSessionManager = (MediaSessionManager) getSystemService(MEDIA_SESSION_SERVICE);
+            }
+            List<MediaController> sessions = mediaSessionManager.getActiveSessions(
+                    new ComponentName(this, NotificationAccessService.class));
+
+            MediaController btController = null;
+            for (MediaController controller : sessions) {
+                String pkg = controller.getPackageName();
+                PlaybackState state = controller.getPlaybackState();
+                if (pkg != null && pkg.toLowerCase(Locale.US).contains("bluetooth")
+                        && state != null && state.getState() == PlaybackState.STATE_PLAYING) {
+                    btController = controller;
+                    break;
+                }
+            }
+
+            if (btController != null) {
+                if (!usbEmulationActive) {
+                    log("BT playback detected from " + btController.getPackageName() + " -- starting bridge.");
+                    startUsbEmulation();
+                }
+                syncBridgePosition(btController);
+            } else if (usbEmulationActive) {
+                log("No BT playback session found -- stopping bridge.");
+                stopUsbEmulation();
+            }
+        } catch (SecurityException e) {
+            log("FAIL bridge poll (SecurityException, notification access may not be effective yet): " + e);
+        } catch (Exception e) {
+            log("FAIL bridge poll: " + e);
+        }
+    }
+
+    private void syncBridgePosition(MediaController btController) {
+        if (silentPlayer == null) return;
+        try {
+            PlaybackState state = btController.getPlaybackState();
+            if (state == null) return;
+            long btPositionMs = state.getPosition();
+            int loopDurationMs = silentPlayer.getDuration();
+            if (loopDurationMs <= 0) return;
+            int targetMs = (int) (btPositionMs % loopDurationMs);
+            int currentMs = silentPlayer.getCurrentPosition();
+            if (Math.abs(targetMs - currentMs) > 800) {
+                silentPlayer.seekTo(targetMs);
+            }
+            log("bridge sync: btPos=" + formatMs((int) btPositionMs) + " -> localPos=" + formatMs(targetMs));
+        } catch (Exception e) {
+            log("FAIL syncBridgePosition: " + e);
+        }
+    }
+
     // ---------- helpers ----------
 
     private String formatMs(int ms) {
@@ -415,8 +596,9 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
-        // Don't leave the poll loop running while this screen isn't visible.
+        // Don't leave the poll loops running while this screen isn't visible.
         stopMusicListener();
+        stopBridgeWatch();
         super.onPause();
     }
 
@@ -424,6 +606,14 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         stopFakeSession();
         stopMusicListener();
+        stopBridgeWatch();
+        if (silentPlayer != null) {
+            try {
+                silentPlayer.release();
+            } catch (Exception ignored) {
+            }
+            silentPlayer = null;
+        }
         if (fileHandler != null) {
             fileHandler.post(() -> {
                 try {

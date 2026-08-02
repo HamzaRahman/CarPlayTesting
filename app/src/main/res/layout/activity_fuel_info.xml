@@ -23,12 +23,19 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:layout_marginBottom="16dp"
+            android:layout_marginBottom="10dp"
             android:background="#332A1B"
             android:padding="10dp"
-            android:text="Showing SAMPLE data. Live values require opening the same serial connection CarInfo.apk uses (com.hcn.autocan), which may conflict with it if both run at once. See MainActivity for the experimental live-read toggle."
+            android:text="EXPERIMENTAL: opens the same serial connection CarInfo.apk uses. May fail (permission denied) or, if it succeeds, may conflict with CarInfo.apk while both run. No data shown until you press Start."
             android:textColor="#F5C36B"
             android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/btnLiveListener"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:text="Start live listener (experimental)" />
 
         <!-- Current fuel section -->
         <TextView

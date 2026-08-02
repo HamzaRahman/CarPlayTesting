@@ -25,6 +25,16 @@
         <activity
             android:name=".FuelInfoActivity"
             android:exported="false" />
+
+        <service
+            android:name=".NotificationAccessService"
+            android:exported="true"
+            android:label="CAN Source Tester BT bridge"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>
