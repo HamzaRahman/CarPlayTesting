@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="300dp"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_card"
+    android:orientation="vertical"
+    android:padding="18dp">
+
+    <TextView
+        android:id="@+id/txtPopupTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:text="Door / Trunk Status"
+        android:textColor="#FFFFFF"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <!-- Top-down car diagram -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="18dp"
+        android:background="@drawable/bg_car_body"
+        android:orientation="vertical"
+        android:padding="10dp">
+
+        <View
+            android:layout_width="40dp"
+            android:layout_height="6dp"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginBottom="6dp"
+            android:background="#4A5057" />
+
+        <TextView
+            android:id="@+id/zoneHood"
+            android:layout_width="match_parent"
+            android:layout_height="34dp"
+            android:layout_marginBottom="6dp"
+            android:background="@drawable/bg_zone_closed"
+            android:gravity="center"
+            android:text="HOOD"
+            android:textColor="#CFCFCF"
+            android:textSize="10sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="70dp"
+            android:layout_marginBottom="6dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/zoneFrontLeft"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_zone_closed"
+                android:gravity="center"
+                android:text="FRONT\nLEFT"
+                android:textColor="#CFCFCF"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="0.9"
+                android:background="@drawable/bg_cabin" />
+
+            <TextView
+                android:id="@+id/zoneFrontRight"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_zone_closed"
+                android:gravity="center"
+                android:text="FRONT\nRIGHT"
+                android:textColor="#CFCFCF"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="70dp"
+            android:layout_marginBottom="6dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/zoneRearLeft"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_zone_closed"
+                android:gravity="center"
+                android:text="REAR\nLEFT"
+                android:textColor="#CFCFCF"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="0.9"
+                android:background="@drawable/bg_cabin" />
+
+            <TextView
+                android:id="@+id/zoneRearRight"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_zone_closed"
+                android:gravity="center"
+                android:text="REAR\nRIGHT"
+                android:textColor="#CFCFCF"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/zoneTrunk"
+            android:layout_width="match_parent"
+            android:layout_height="34dp"
+            android:layout_marginBottom="6dp"
+            android:background="@drawable/bg_zone_closed"
+            android:gravity="center"
+            android:text="TRUNK"
+            android:textColor="#CFCFCF"
+            android:textSize="10sp"
+            android:textStyle="bold" />
+
+        <View
+            android:layout_width="60dp"
+            android:layout_height="6dp"
+            android:layout_gravity="center_horizontal"
+            android:background="#4A5057" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/txtPopupSummary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:gravity="center"
+        android:text="All closed"
+        android:textColor="#AAAAAA"
+        android:textSize="12sp" />
+
+    <Button
+        android:id="@+id/btnPopupClose"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="Close" />
+
+</LinearLayout>

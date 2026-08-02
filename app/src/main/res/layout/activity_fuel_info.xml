@@ -204,6 +204,13 @@
                 android:text="Bits packed in a single byte at pData[4] when GID/SID header pData[1]==18 (0x12). mFront=bit2 (hood), mRear=bit3 (trunk), FL=bit7, FR=bit6, RL=bit5, RR=bit4."
                 android:textColor="#777777"
                 android:textSize="10sp" />
+
+            <Button
+                android:id="@+id/btnPreviewDoorPopup"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="Preview door/trunk popup" />
         </LinearLayout>
 
         <View

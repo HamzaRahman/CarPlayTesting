@@ -68,6 +68,12 @@ public class FuelInfoActivity extends Activity {
         addDoorPill(doorRow2, "Front R", false);
         addDoorPill(doorRow2, "Rear L", false);
         addDoorPill(doorRow2, "Rear R", false);
+
+        findViewById(R.id.btnPreviewDoorPopup).setOnClickListener(v -> {
+            DoorPopup.State state = new DoorPopup.State();
+            state.frontLeft = true;
+            DoorPopup.show(this, state);
+        });
     }
 
     private void bindStat(int includeId, String label, String value, String unit, int progress) {
