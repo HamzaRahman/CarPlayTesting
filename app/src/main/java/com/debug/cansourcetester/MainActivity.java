@@ -1,6 +1,7 @@
 package com.debug.cansourcetester;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -71,6 +72,7 @@ public class MainActivity extends Activity {
         Button btnKeyBt = findViewById(R.id.btnKeyBt);
         Button btnKeyBtMusic = findViewById(R.id.btnKeyBtMusic);
         Button btnKeyMusic = findViewById(R.id.btnKeyMusic);
+        Button btnFuelInfo = findViewById(R.id.btnFuelInfo);
 
         // Step 1: claim source. Confirmed by decompiling the real BluetoothService.apk
         // (android.sourceservice.SourceInfo, android.sourceservice.SourceService):
@@ -97,6 +99,8 @@ public class MainActivity extends Activity {
         btnKeyBt.setOnClickListener(v -> injectMcuKey(302, 0));       // K_BT
         btnKeyBtMusic.setOnClickListener(v -> injectMcuKey(331, 0));  // K_BTMUSIC
         btnKeyMusic.setOnClickListener(v -> injectMcuKey(209, 0));    // K_MUSIC
+
+        btnFuelInfo.setOnClickListener(v -> startActivity(new Intent(this, FuelInfoActivity.class)));
 
         log("Ready. Package=" + getPackageName());
     }

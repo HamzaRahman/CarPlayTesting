@@ -125,6 +125,13 @@
                 android:text="K_MUSIC (209)" />
         </LinearLayout>
 
+        <Button
+            android:id="@+id/btnFuelInfo"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Fuel &amp; Doors reference (from CarInfo.apk)" />
+
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
