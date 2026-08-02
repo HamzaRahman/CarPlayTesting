@@ -42,22 +42,22 @@ import android.widget.TextView;
  */
 public class FuelInfoActivity extends Activity {
 
-    private static final int GAUGE_MAX = 60;
+    private static final int GAUGE_MAX = 20; // realistic km/L ceiling for a Civic
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_fuel_info);
 
-        bindStat(R.id.cardInstant, "Instant", "8.4", "mpg", 8);
-        bindStat(R.id.cardCurAvg, "Current avg (this trip)", "31.2", "mpg", 31);
-        bindStat(R.id.cardLastAvg, "Last trip avg", "29.7", "mpg", 30);
-        bindStat(R.id.cardOverallAvg, "Overall avg (lifetime)", "33.5", "mpg", 34);
+        bindStat(R.id.cardInstant, "Instant", "10.5", "km/L", 11);
+        bindStat(R.id.cardCurAvg, "Current avg (this trip)", "13.2", "km/L", 13);
+        bindStat(R.id.cardLastAvg, "Last trip avg", "12.6", "km/L", 13);
+        bindStat(R.id.cardOverallAvg, "Overall avg (lifetime)", "14.1", "km/L", 14);
 
         LinearLayout historyContainer = findViewById(R.id.historyContainer);
-        addHistoryRow(historyContainer, "Reset 1", "412.6 km", "32.1 mpg");
-        addHistoryRow(historyContainer, "Reset 2", "388.9 km", "30.4 mpg");
-        addHistoryRow(historyContainer, "Reset 3", "501.2 km", "33.8 mpg");
+        addHistoryRow(historyContainer, "Reset 1", "412.6 km", "13.6 km/L");
+        addHistoryRow(historyContainer, "Reset 2", "388.9 km", "12.9 km/L");
+        addHistoryRow(historyContainer, "Reset 3", "501.2 km", "14.3 km/L");
 
         LinearLayout doorRow1 = findViewById(R.id.doorGridRow1);
         addDoorPill(doorRow1, "Hood", false);

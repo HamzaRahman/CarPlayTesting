@@ -9,6 +9,7 @@
 
     <application
         android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
         android:label="CAN Source Tester"
         android:theme="@style/Theme.AppCompat.DayNight">
 
