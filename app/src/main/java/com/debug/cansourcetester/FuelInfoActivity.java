@@ -129,8 +129,8 @@ public class FuelInfoActivity extends Activity {
         pill.setBackgroundResource(open ? R.drawable.bg_pill_open : R.drawable.bg_pill_closed);
         pill.setPadding(dp(10), dp(8), dp(10), dp(8));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        params.marginEnd = dp(6);
-        params.marginStart = dp(6);
+        params.setMarginEnd(dp(6));
+        params.setMarginStart(dp(6));
         pill.setLayoutParams(params);
         container.addView(pill);
     }
