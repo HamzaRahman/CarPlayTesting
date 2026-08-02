@@ -72,17 +72,24 @@ public class MainActivity extends Activity {
         Button btnKeyBtMusic = findViewById(R.id.btnKeyBtMusic);
         Button btnKeyMusic = findViewById(R.id.btnKeyMusic);
 
-        // Step 1: claim source. We pass our OWN package name (this is what
-        // requestPlayAudio(Context) does under the hood in the OEM Radio
-        // app: it resolves to context.getPackageName()). We also try passing
-        // a spoofed package-like string per source, since it's unclear from
-        // the decompile whether the service keys off package name specifically
-        // or just uses whatever string it's given as a display source key —
-        // that's exactly what we're testing.
+        // Step 1: claim source. Confirmed by decompiling the real BluetoothService.apk
+        // (android.sourceservice.SourceInfo, android.sourceservice.SourceService):
+        // onRequestPlayAudio(String) appends "/background" to whatever we pass, and the
+        // service matches the result against fixed ACTIVE_* package constants by prefix
+        // (e.g. ACTIVE_RADIO="com.hcn.autoradio", ACTIVE_BT="com.autochips.bluetooth").
+        // The real Bluetooth app literally calls:
+        //   mSourceInfo.onRequestPlayAudio("com.autochips.bluetooth/.BtMusicActivity")
+        // Our earlier guess "com.android.bluetooth" never matched ACTIVE_BT, hence no-op.
+        // USB isn't claimed via SourceInfo at all (Music.apk never references it) — it's
+        // handled at a lower, automatic level, matching that USB already worked on iMID.
+        // AUX has no dedicated audio-in constant; ACTIVE_AUX="com.auto.hcamera" is the
+        // backup-camera package, so "com.hcn.audioinputsource" (referenced elsewhere in
+        // SourceService as a distinct, specially-handled package) is the best candidate
+        // for a physical AUX-in source — untested, flag it clearly in the log.
         btnRadio.setOnClickListener(v -> claimSource("com.hcn.autoradio"));
         btnUsb.setOnClickListener(v -> claimSource("com.android.usb"));
-        btnBt.setOnClickListener(v -> claimSource("com.android.bluetooth"));
-        btnAux.setOnClickListener(v -> claimSource("com.debug.cansourcetester.AUX"));
+        btnBt.setOnClickListener(v -> claimSource("com.autochips.bluetooth/.BtMusicActivity"));
+        btnAux.setOnClickListener(v -> claimSource("com.hcn.audioinputsource"));
 
         btnStart.setOnClickListener(v -> startFakeSession());
         btnStop.setOnClickListener(v -> stopFakeSession());
