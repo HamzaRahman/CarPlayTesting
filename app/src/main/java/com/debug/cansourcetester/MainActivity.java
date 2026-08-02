@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.Looper;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
@@ -15,8 +16,15 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
 
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 
 /**
  * Debug tool for probing the head unit's shared "SourceInfo" / "McuManager"
@@ -41,6 +49,43 @@ public class MainActivity extends Activity {
     private int fakePositionMs = 0;
     private int fakeDurationMs = 3 * 60 * 1000; // 3:00 fake duration
     private boolean sessionRunning = false;
+
+    // ---------- MusicInfo listener (Step 4) ----------
+    // 1GB-RAM device: keep this cheap. Reflection objects (Class/Method/Field)
+    // are resolved once and cached, poll interval is slow (2s, plenty for
+    // minute:second granularity), and we only touch the log when the
+    // formatted snapshot actually changes instead of every tick.
+    private static final long MUSIC_POLL_INTERVAL_MS = 2000;
+    private static final int LOG_MAX_CHARS = 6000; // trim old lines past this to bound memory
+    private boolean musicListenerRunning = false;
+    private boolean musicReflectionReady = false;
+    private Method musicGetInstanceMethod;
+    private Method musicGetMusicInfoMethod;
+    private Field musicClassNameField;
+    private Field musicFileNameField;
+    private Field musicStateField;
+    private Field musicDurationField;
+    private Field musicPositionField;
+    private String lastMusicSnapshot = "";
+
+    private final Runnable musicPollRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!musicListenerRunning) return;
+            pollMusicInfoOnce();
+            handler.postDelayed(this, MUSIC_POLL_INTERVAL_MS);
+        }
+    };
+
+    // ---------- log-to-file ----------
+    // Writes happen on their own background thread so disk I/O never blocks
+    // the UI thread on this weak hardware. File lives in the app's own
+    // external files dir (no extra permission needed), visible over USB at
+    // Android/data/com.debug.cansourcetester/files/cansourcetester_log.txt
+    private HandlerThread fileThread;
+    private Handler fileHandler;
+    private FileWriter logFileWriter;
+    private final SimpleDateFormat logTimeFormat = new SimpleDateFormat("HH:mm:ss", Locale.US);
 
     private final Runnable tickRunnable = new Runnable() {
         @Override
@@ -73,6 +118,7 @@ public class MainActivity extends Activity {
         Button btnKeyBtMusic = findViewById(R.id.btnKeyBtMusic);
         Button btnKeyMusic = findViewById(R.id.btnKeyMusic);
         Button btnFuelInfo = findViewById(R.id.btnFuelInfo);
+        Button btnMusicListener = findViewById(R.id.btnMusicListener);
 
         // Step 1: claim source. Confirmed by decompiling the real BluetoothService.apk
         // (android.sourceservice.SourceInfo, android.sourceservice.SourceService):
@@ -101,6 +147,18 @@ public class MainActivity extends Activity {
         btnKeyMusic.setOnClickListener(v -> injectMcuKey(209, 0));    // K_MUSIC
 
         btnFuelInfo.setOnClickListener(v -> startActivity(new Intent(this, FuelInfoActivity.class)));
+
+        initLogFile();
+
+        btnMusicListener.setOnClickListener(v -> {
+            if (musicListenerRunning) {
+                stopMusicListener();
+                btnMusicListener.setText("Start MusicInfo listener");
+            } else {
+                startMusicListener();
+                btnMusicListener.setText("Stop MusicInfo listener");
+            }
+        });
 
         log("Ready. Package=" + getPackageName());
     }
@@ -216,6 +274,87 @@ public class MainActivity extends Activity {
         }
     }
 
+    // ---------- Step 4: read-only MusicInfo listener ----------
+    // Confirmed from decompiling the real BluetoothService.apk: ISourceService
+    // exposes a read-only getMusicInfo() alongside onRequestPlayAudio(), backed
+    // by android.sourceservice.MusicInfo (public fields className/fileName/
+    // state/duration/position, duration+position in ms). SourceService updates
+    // that struct whenever ANY app's real MediaPlayer/AudioTrack reports
+    // playback (the patched-framework hook discussed earlier) -- so polling it
+    // here shows exactly what's being sent toward the CAN box for whichever
+    // app currently owns the source, e.g. the real Music app.
+
+    private void startMusicListener() {
+        if (musicListenerRunning) return;
+        if (!initMusicInfoReflectionIfNeeded()) return;
+        musicListenerRunning = true;
+        lastMusicSnapshot = "";
+        log("MusicInfo listener started (polling every " + (MUSIC_POLL_INTERVAL_MS / 1000) + "s).");
+        handler.removeCallbacks(musicPollRunnable);
+        handler.post(musicPollRunnable);
+    }
+
+    private void stopMusicListener() {
+        if (!musicListenerRunning) return;
+        musicListenerRunning = false;
+        handler.removeCallbacks(musicPollRunnable);
+        log("MusicInfo listener stopped.");
+    }
+
+    private boolean initMusicInfoReflectionIfNeeded() {
+        if (musicReflectionReady) return true;
+        try {
+            Class<?> sourceInfoClass = Class.forName("android.sourceservice.SourceInfo");
+            musicGetInstanceMethod = sourceInfoClass.getMethod("getInstance");
+            musicGetMusicInfoMethod = sourceInfoClass.getMethod("getMusicInfo");
+
+            Class<?> musicInfoClass = Class.forName("android.sourceservice.MusicInfo");
+            musicClassNameField = musicInfoClass.getField("className");
+            musicFileNameField = musicInfoClass.getField("fileName");
+            musicStateField = musicInfoClass.getField("state");
+            musicDurationField = musicInfoClass.getField("duration");
+            musicPositionField = musicInfoClass.getField("position");
+
+            musicReflectionReady = true;
+            return true;
+        } catch (Exception e) {
+            log("FAIL init MusicInfo reflection: " + e
+                    + " (getMusicInfo() may not be exposed on the SourceInfo wrapper on this ROM)");
+            return false;
+        }
+    }
+
+    private void pollMusicInfoOnce() {
+        try {
+            Object instance = musicGetInstanceMethod.invoke(null);
+            if (instance == null) return;
+            Object musicInfo = musicGetMusicInfoMethod.invoke(instance);
+            if (musicInfo == null) return;
+
+            String className = String.valueOf(musicClassNameField.get(musicInfo));
+            String fileName = String.valueOf(musicFileNameField.get(musicInfo));
+            String state = String.valueOf(musicStateField.get(musicInfo));
+            int duration = musicDurationField.getInt(musicInfo);
+            int position = musicPositionField.getInt(musicInfo);
+
+            String snapshot = "source=" + className
+                    + " state=" + state
+                    + " pos=" + formatMs(position) + "/" + formatMs(duration)
+                    + " file=" + fileName;
+
+            if (!snapshot.equals(lastMusicSnapshot)) {
+                lastMusicSnapshot = snapshot;
+                log(snapshot);
+            }
+        } catch (InvocationTargetException e) {
+            log("FAIL pollMusicInfo: threw " + e.getCause());
+            stopMusicListener();
+        } catch (Exception e) {
+            log("FAIL pollMusicInfo: " + e);
+            stopMusicListener();
+        }
+    }
+
     // ---------- helpers ----------
 
     private String formatMs(int ms) {
@@ -223,16 +362,77 @@ public class MainActivity extends Activity {
         return String.format("%d:%02d", totalSec / 60, totalSec % 60);
     }
 
+    private void initLogFile() {
+        try {
+            File dir = getExternalFilesDir(null);
+            if (dir == null) {
+                log("FAIL open log file: external storage unavailable, file logging disabled");
+                return;
+            }
+            fileThread = new HandlerThread("LogFileWriter");
+            fileThread.start();
+            fileHandler = new Handler(fileThread.getLooper());
+            File logFile = new File(dir, "cansourcetester_log.txt");
+            logFileWriter = new FileWriter(logFile, true); // append across runs
+            String header = "\n----- session start " + logTimeFormat.format(new Date()) + " -----\n";
+            fileHandler.post(() -> writeLineToFile(header));
+            log("Log file: " + logFile.getAbsolutePath());
+        } catch (IOException e) {
+            log("FAIL open log file: " + e);
+        }
+    }
+
+    private void writeLineToFile(String line) {
+        if (logFileWriter == null) return;
+        try {
+            logFileWriter.write(line);
+            if (!line.endsWith("\n")) logFileWriter.write("\n");
+            logFileWriter.flush();
+        } catch (IOException e) {
+            Log.w(TAG, "log file write failed", e);
+        }
+    }
+
     private void log(String msg) {
         Log.d(TAG, msg);
+        String timestamped = logTimeFormat.format(new Date()) + "  " + msg;
         runOnUiThread(() -> {
             logView.append(msg + "\n");
+            // Bound memory on this 1GB-RAM device: drop oldest lines once the
+            // log grows past LOG_MAX_CHARS instead of letting it grow forever.
+            CharSequence text = logView.getText();
+            if (text.length() > LOG_MAX_CHARS) {
+                int cutFrom = text.length() - LOG_MAX_CHARS;
+                int newlineAfterCut = text.toString().indexOf('\n', cutFrom);
+                int trimAt = newlineAfterCut >= 0 ? newlineAfterCut + 1 : cutFrom;
+                logView.setText(text.subSequence(trimAt, text.length()));
+            }
         });
+        if (fileHandler != null) {
+            fileHandler.post(() -> writeLineToFile(timestamped));
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        // Don't leave the poll loop running while this screen isn't visible.
+        stopMusicListener();
+        super.onPause();
     }
 
     @Override
     protected void onDestroy() {
         stopFakeSession();
+        stopMusicListener();
+        if (fileHandler != null) {
+            fileHandler.post(() -> {
+                try {
+                    if (logFileWriter != null) logFileWriter.close();
+                } catch (IOException ignored) {
+                }
+            });
+            fileThread.quitSafely();
+        }
         super.onDestroy();
     }
 }
