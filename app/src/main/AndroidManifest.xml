@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/auto">
+
+    <!-- Some head-unit ROMs guard the sourceservice/carsource system services
+         behind a signature or custom permission. If logcat shows a
+         SecurityException, check `adb shell dumpsys package android.sourceservice`
+         (or similar) on your unit for the exact permission name and add it here. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <application
+        android:allowBackup="false"
+        android:label="CAN Source Tester"
+        android:theme="@style/Theme.AppCompat.DayNight">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>
