@@ -3,14 +3,16 @@ package com.debug.cansourcetester;
 import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Intent;
-import android.media.MediaPlayer;
+import android.media.MediaMetadata;
 import android.media.session.MediaController;
 import android.media.session.MediaSessionManager;
 import android.media.session.PlaybackState;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.os.IBinder;
 import android.os.Looper;
+import android.os.Parcel;
 import android.provider.Settings;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
@@ -94,9 +96,10 @@ public class MainActivity extends Activity {
     // (BT playback happens on the phone, no local MediaPlayer instance for
     // it exists on the head unit) -- so the bridge reads BT's real position
     // from its MediaSession (needs Notification access, public API, not
-    // reflection) and periodically re-seeks our silent player to match.
+    // reflection) and reports it directly via a raw Binder transact() call
+    // (see the Step 5 implementation section for the exact reconstructed
+    // wire format -- no local audio playback is involved at all anymore).
     private static final long BRIDGE_POLL_INTERVAL_MS = 2000;
-    private MediaPlayer silentPlayer;
     private boolean usbEmulationActive = false;
     private boolean bridgeWatchRunning = false;
     private boolean notifAccessWarned = false;
@@ -174,9 +177,9 @@ public class MainActivity extends Activity {
         btnAux.setOnClickListener(v -> claimSource("com.hcn.audioinputsource"));
 
         // USB button now does the real thing instead of just claiming the
-        // (nonexistent) "com.android.usb" source key: it starts our own real
-        // local MediaPlayer loop under our own package as source, the exact
-        // mechanism Step 4's log capture confirmed actually gets reported.
+        // (nonexistent) "com.android.usb" source key: it claims our own
+        // package as source, then directly reports ticking playback status
+        // via a raw Binder transact() to "sourceinfo" -- see Step 5 below.
         btnUsb.setOnClickListener(v -> {
             if (usbEmulationActive) {
                 stopUsbEmulation();
@@ -414,35 +417,89 @@ public class MainActivity extends Activity {
     }
 
     // ---------- Step 5 implementation ----------
+    // Instead of hoping a real local MediaPlayer gets auto-detected (tested,
+    // confirmed NOT to work -- state/position never populated), this builds
+    // the exact raw Binder transaction a reporting app sends to "sourceinfo"
+    // directly, reconstructed field-for-field from SourceService.onTransact()
+    // case 201 (MEDIAPLAYER_CALL_TRANSACTION):
+    //   writeInterfaceToken("android.sourceservice.ISourceInfo")
+    //   writeString(reportingIdentity)   // gated: must startsWith(CurrentSource)
+    //   writeInt(session)
+    //   writeString(fileName)
+    //   writeString(state)               // "start" / "stopped"
+    //   writeInt(durationMs)
+    //   writeInt(positionMs)
+    // No permission check is visible before this data gets accepted -- only
+    // enforceInterface() (a descriptor sanity check, not a security gate).
+    private static final String SOURCEINFO_DESCRIPTOR = "android.sourceservice.ISourceInfo";
+    private IBinder cachedSourceInfoBinder;
+    private int usbEmuPositionMs = 0;
+    private int usbEmuDurationMs = 3 * 60 * 1000 + 15 * 1000; // arbitrary plausible track length
+    private boolean bridgeReporting = false;
 
-    private void startUsbEmulation() {
-        claimSource(getPackageName());
+    private final Runnable usbEmuTickRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!usbEmulationActive) return;
+            usbEmuPositionMs += 1000;
+            if (usbEmuPositionMs > usbEmuDurationMs) usbEmuPositionMs = 0;
+            reportMediaStatus(getPackageName(), "TEST_TRACK_RAW.mp3", "start", usbEmuDurationMs, usbEmuPositionMs, 1);
+            handler.postDelayed(this, 1000);
+        }
+    };
+
+    private IBinder getSourceInfoBinder() throws Exception {
+        if (cachedSourceInfoBinder != null && cachedSourceInfoBinder.isBinderAlive()) {
+            return cachedSourceInfoBinder;
+        }
+        Class<?> serviceManagerClass = Class.forName("android.os.ServiceManager");
+        Method getServiceMethod = serviceManagerClass.getMethod("getService", String.class);
+        cachedSourceInfoBinder = (IBinder) getServiceMethod.invoke(null, "sourceinfo");
+        return cachedSourceInfoBinder;
+    }
+
+    private void reportMediaStatus(String reportingIdentity, String fileName, String state,
+                                    int durationMs, int positionMs, int session) {
+        Parcel data = Parcel.obtain();
+        Parcel reply = Parcel.obtain();
         try {
-            if (silentPlayer == null) {
-                silentPlayer = MediaPlayer.create(this, R.raw.silence);
-                silentPlayer.setLooping(true);
-                silentPlayer.setVolume(0f, 0f); // belt-and-braces mute even though content is silent
+            IBinder binder = getSourceInfoBinder();
+            if (binder == null) {
+                log("FAIL reportMediaStatus: \"sourceinfo\" service not found via ServiceManager");
+                return;
             }
-            if (!silentPlayer.isPlaying()) {
-                silentPlayer.start();
-            }
-            usbEmulationActive = true;
-            log("USB emulation started: local MediaPlayer looping under source=" + getPackageName());
+            data.writeInterfaceToken(SOURCEINFO_DESCRIPTOR);
+            data.writeString(reportingIdentity);
+            data.writeInt(session);
+            data.writeString(fileName);
+            data.writeString(state);
+            data.writeInt(durationMs);
+            data.writeInt(positionMs);
+            boolean ok = binder.transact(201, data, reply, 0);
+            log("reportMediaStatus " + (ok ? "OK" : "FAILED (transact returned false)")
+                    + ": id=" + reportingIdentity + " state=" + state
+                    + " pos=" + formatMs(positionMs) + "/" + formatMs(durationMs) + " file=" + fileName);
         } catch (Exception e) {
-            log("FAIL startUsbEmulation: " + e);
-            usbEmulationActive = false;
+            log("FAIL reportMediaStatus: " + e);
+        } finally {
+            data.recycle();
+            reply.recycle();
         }
     }
 
+    private void startUsbEmulation() {
+        claimSource(getPackageName());
+        usbEmuPositionMs = 0;
+        usbEmulationActive = true;
+        handler.removeCallbacks(usbEmuTickRunnable);
+        handler.post(usbEmuTickRunnable);
+        log("USB emulation started: raw sourceinfo transact() ticking under source=" + getPackageName());
+    }
+
     private void stopUsbEmulation() {
-        if (silentPlayer != null && silentPlayer.isPlaying()) {
-            try {
-                silentPlayer.pause();
-            } catch (Exception e) {
-                log("FAIL stopUsbEmulation: " + e);
-            }
-        }
         usbEmulationActive = false;
+        handler.removeCallbacks(usbEmuTickRunnable);
+        reportMediaStatus(getPackageName(), "", "stopped", 0, 0, 1);
         log("USB emulation stopped.");
     }
 
@@ -467,6 +524,10 @@ public class MainActivity extends Activity {
     private void stopBridgeWatch() {
         bridgeWatchRunning = false;
         handler.removeCallbacks(bridgeWatchRunnable);
+        if (bridgeReporting) {
+            reportMediaStatus(getPackageName(), "", "stopped", 0, 0, 1);
+            bridgeReporting = false;
+        }
         log("BT->USB bridge watch stopped.");
     }
 
@@ -501,14 +562,16 @@ public class MainActivity extends Activity {
             }
 
             if (btController != null) {
-                if (!usbEmulationActive) {
+                if (!bridgeReporting) {
                     log("BT playback detected from " + btController.getPackageName() + " -- starting bridge.");
-                    startUsbEmulation();
+                    claimSource(getPackageName());
+                    bridgeReporting = true;
                 }
                 syncBridgePosition(btController);
-            } else if (usbEmulationActive) {
+            } else if (bridgeReporting) {
                 log("No BT playback session found -- stopping bridge.");
-                stopUsbEmulation();
+                reportMediaStatus(getPackageName(), "", "stopped", 0, 0, 1);
+                bridgeReporting = false;
             }
         } catch (SecurityException e) {
             log("FAIL bridge poll (SecurityException, notification access may not be effective yet): " + e);
@@ -518,19 +581,14 @@ public class MainActivity extends Activity {
     }
 
     private void syncBridgePosition(MediaController btController) {
-        if (silentPlayer == null) return;
         try {
             PlaybackState state = btController.getPlaybackState();
             if (state == null) return;
             long btPositionMs = state.getPosition();
-            int loopDurationMs = silentPlayer.getDuration();
-            if (loopDurationMs <= 0) return;
-            int targetMs = (int) (btPositionMs % loopDurationMs);
-            int currentMs = silentPlayer.getCurrentPosition();
-            if (Math.abs(targetMs - currentMs) > 800) {
-                silentPlayer.seekTo(targetMs);
-            }
-            log("bridge sync: btPos=" + formatMs((int) btPositionMs) + " -> localPos=" + formatMs(targetMs));
+            MediaMetadata metadata = btController.getMetadata();
+            long btDurationMs = metadata != null ? metadata.getLong(MediaMetadata.METADATA_KEY_DURATION) : 0;
+            String title = metadata != null ? String.valueOf(metadata.getString(MediaMetadata.METADATA_KEY_TITLE)) : "BT_TRACK";
+            reportMediaStatus(getPackageName(), title, "start", (int) btDurationMs, (int) btPositionMs, 1);
         } catch (Exception e) {
             log("FAIL syncBridgePosition: " + e);
         }
@@ -607,13 +665,7 @@ public class MainActivity extends Activity {
         stopFakeSession();
         stopMusicListener();
         stopBridgeWatch();
-        if (silentPlayer != null) {
-            try {
-                silentPlayer.release();
-            } catch (Exception ignored) {
-            }
-            silentPlayer = null;
-        }
+        handler.removeCallbacks(usbEmuTickRunnable);
         if (fileHandler != null) {
             fileHandler.post(() -> {
                 try {
