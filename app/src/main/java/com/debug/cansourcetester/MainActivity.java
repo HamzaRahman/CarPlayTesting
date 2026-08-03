@@ -493,8 +493,13 @@ public class MainActivity extends Activity {
             log("reportMediaStatus " + (ok ? "OK" : "FAILED (transact returned false)")
                     + ": id=" + reportingIdentity + " state=" + state
                     + " pos=" + formatMs(positionMs) + "/" + formatMs(durationMs) + " file=" + fileName);
-        } catch (Exception e) {
-            log("FAIL reportMediaStatus: " + e);
+        } catch (Throwable t) {
+            // Catch Throwable, not just Exception: hidden-API enforcement on
+            // android.os.ServiceManager can throw NoSuchMethodError/
+            // NoSuchFieldError (Error, not Exception) at invoke time even
+            // when the reflective lookup itself succeeded -- that escaped
+            // a plain catch(Exception) and crashed the app.
+            log("FAIL reportMediaStatus: " + t);
         } finally {
             data.recycle();
             reply.recycle();
