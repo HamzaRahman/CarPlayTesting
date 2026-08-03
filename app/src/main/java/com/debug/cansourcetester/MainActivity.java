@@ -443,7 +443,7 @@ public class MainActivity extends Activity {
             if (!usbEmulationActive) return;
             usbEmuPositionMs += 1000;
             if (usbEmuPositionMs > usbEmuDurationMs) usbEmuPositionMs = 0;
-            reportMediaStatus(getPackageName(), "TEST_TRACK_RAW.mp3", "start", usbEmuDurationMs, usbEmuPositionMs, 1);
+            reportMediaStatus(reportingIdentity(), "TEST_TRACK_RAW.mp3", "start", usbEmuDurationMs, usbEmuPositionMs, 1);
             handler.postDelayed(this, 1000);
         }
     };
@@ -456,6 +456,20 @@ public class MainActivity extends Activity {
         Method getServiceMethod = serviceManagerClass.getMethod("getService", String.class);
         cachedSourceInfoBinder = (IBinder) getServiceMethod.invoke(null, "sourceinfo");
         return cachedSourceInfoBinder;
+    }
+
+    /**
+     * claimSource() calls onRequestPlayAudio(String), which we already proved
+     * (decompiling SourceInfo.java) silently appends "/background" before it
+     * reaches the service -- so CurrentSource actually ends up as
+     * "<package>/background", not just "<package>". The accept gate in
+     * SourceService requires reportingIdentity.startsWith(CurrentSource), so
+     * our reports must include that exact same suffix to match, or they get
+     * silently dropped regardless of whether the raw Binder call itself
+     * succeeds.
+     */
+    private String reportingIdentity() {
+        return getPackageName() + "/background";
     }
 
     private void reportMediaStatus(String reportingIdentity, String fileName, String state,
@@ -499,7 +513,7 @@ public class MainActivity extends Activity {
     private void stopUsbEmulation() {
         usbEmulationActive = false;
         handler.removeCallbacks(usbEmuTickRunnable);
-        reportMediaStatus(getPackageName(), "", "stopped", 0, 0, 1);
+        reportMediaStatus(reportingIdentity(), "", "stopped", 0, 0, 1);
         log("USB emulation stopped.");
     }
 
@@ -525,7 +539,7 @@ public class MainActivity extends Activity {
         bridgeWatchRunning = false;
         handler.removeCallbacks(bridgeWatchRunnable);
         if (bridgeReporting) {
-            reportMediaStatus(getPackageName(), "", "stopped", 0, 0, 1);
+            reportMediaStatus(reportingIdentity(), "", "stopped", 0, 0, 1);
             bridgeReporting = false;
         }
         log("BT->USB bridge watch stopped.");
@@ -570,7 +584,7 @@ public class MainActivity extends Activity {
                 syncBridgePosition(btController);
             } else if (bridgeReporting) {
                 log("No BT playback session found -- stopping bridge.");
-                reportMediaStatus(getPackageName(), "", "stopped", 0, 0, 1);
+                reportMediaStatus(reportingIdentity(), "", "stopped", 0, 0, 1);
                 bridgeReporting = false;
             }
         } catch (SecurityException e) {
@@ -588,7 +602,7 @@ public class MainActivity extends Activity {
             MediaMetadata metadata = btController.getMetadata();
             long btDurationMs = metadata != null ? metadata.getLong(MediaMetadata.METADATA_KEY_DURATION) : 0;
             String title = metadata != null ? String.valueOf(metadata.getString(MediaMetadata.METADATA_KEY_TITLE)) : "BT_TRACK";
-            reportMediaStatus(getPackageName(), title, "start", (int) btDurationMs, (int) btPositionMs, 1);
+            reportMediaStatus(reportingIdentity(), title, "start", (int) btDurationMs, (int) btPositionMs, 1);
         } catch (Exception e) {
             log("FAIL syncBridgePosition: " + e);
         }
